@@ -73,7 +73,7 @@ class GroqClient:
             metadata = chunk.get('metadata', {})
             doc_name = metadata.get('document_name', 'Unknown')
             page_num = metadata.get('page_num', '?')
-            text = chunk.get('document', '')
+            text = chunk.get('text', '')
             context_parts.append(f"[Source {i}: {doc_name}, Page {page_num}]\n{text}")
         return '\n\n'.join(context_parts)
     
