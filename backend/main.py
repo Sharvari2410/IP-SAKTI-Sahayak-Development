@@ -12,6 +12,15 @@ from chunker import Chunker
 from embeddings import EmbeddingGenerator
 from vector_store import VectorStore
 from llm_client import GroqClient
+from invention_comparison import (
+    EvidenceItem,
+    FeatureComparison,
+    InventionComparisonResponse,
+    assess_overall,
+    build_explanation,
+    compare_candidate,
+    retrieve_comparison_candidates,
+)
 
 app = FastAPI(title="IP-SAKTI Sahayak API")
 
@@ -66,6 +75,10 @@ class ProductAnalysisResponse(BaseModel):
     status: str
 
 
+class CompareInventionRequest(BaseModel):
+    product_profile: InventionProfile
+
+
 class DocumentInfo(BaseModel):
     document_name: str
     page_count: int
@@ -118,6 +131,31 @@ async def analyze_product(profile: InventionProfile):
         product_profile=profile,
         status="profile_created"
     )
+
+
+@app.post("/compare-invention", response_model=InventionComparisonResponse)
+async def compare_invention(request: CompareInventionRequest):
+    """Retrieve and compare evidence across the invention's key dimensions."""
+    try:
+        candidates = retrieve_comparison_candidates(
+            request.product_profile,
+            embedding_generator,
+            vector_store,
+        )
+        feature_comparisons: List[FeatureComparison] = []
+        for candidate in candidates:
+            feature_comparisons.extend(compare_candidate(request.product_profile, candidate))
+
+        overall_assessment = assess_overall(feature_comparisons)
+        return InventionComparisonResponse(
+            product_profile=request.product_profile.model_dump(),
+            evidence_items=[EvidenceItem(**candidate) for candidate in candidates],
+            feature_comparisons=feature_comparisons,
+            overall_assessment=overall_assessment,
+            explanation=build_explanation(overall_assessment, feature_comparisons),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error comparing invention: {str(e)}")
 
 
 @app.post("/upload")
