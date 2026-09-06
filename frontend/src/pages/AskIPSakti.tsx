@@ -33,10 +33,37 @@ interface QueryResponse {
   }
 }
 
+interface ProductProfileForm {
+  product_type: string
+  ingredients: string
+  proportions: string
+  intended_use: string
+  target_application: string
+  preparation_method: string
+  claimed_effect: string
+}
+
+interface ProductAnalysisResponse {
+  product_profile: Omit<ProductProfileForm, 'ingredients'> & { ingredients: string[] }
+  status: string
+}
+
 const AskIPSakti = () => {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [response, setResponse] = useState<QueryResponse | null>(null)
+  const [mode, setMode] = useState<'question' | 'product'>('question')
+  const [productLoading, setProductLoading] = useState(false)
+  const [productResponse, setProductResponse] = useState<ProductAnalysisResponse | null>(null)
+  const [productProfile, setProductProfile] = useState<ProductProfileForm>({
+    product_type: '',
+    ingredients: '',
+    proportions: '',
+    intended_use: '',
+    target_application: '',
+    preparation_method: '',
+    claimed_effect: ''
+  })
   const [showRAGProcess, setShowRAGProcess] = useState(false)
   const [showEvidence, setShowEvidence] = useState(true)
   const [jurisdiction, setJurisdiction] = useState<'india' | 'international'>('india')
@@ -208,6 +235,40 @@ const AskIPSakti = () => {
     }
   }
 
+  const handleProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProductLoading(true)
+    setProductResponse(null)
+
+    try {
+      const res = await fetch('http://localhost:8000/analyze-product', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...productProfile,
+          ingredients: productProfile.ingredients
+            .split(',')
+            .map(ingredient => ingredient.trim())
+            .filter(Boolean)
+        })
+      })
+
+      if (!res.ok) {
+        throw new Error(`Product analysis failed with status ${res.status}`)
+      }
+
+      setProductResponse(await res.json())
+    } catch (error) {
+      console.error('Error analyzing product:', error)
+    } finally {
+      setProductLoading(false)
+    }
+  }
+
+  const updateProductField = (field: keyof ProductProfileForm, value: string) => {
+    setProductProfile(prev => ({ ...prev, [field]: value }))
+  }
+
   const generateFollowUpQuestions = (currentQuestion: string, retrievedChunks: RetrievedChunk[]) => {
     const followUpQuestions: string[] = []
     
@@ -251,8 +312,101 @@ const AskIPSakti = () => {
     <div className="max-w-4xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-deepBlue mb-2">Ask an IP Question</h1>
-        <p className="text-gray-600">Search across indexed IP documents and receive cited, evidence-backed answers.</p>
+        <p className="text-gray-600">Ask about indexed IP documents or create a structured product profile for future analysis.</p>
       </div>
+
+      <div className="mb-8 flex bg-white border border-lightGray rounded-lg p-1 w-fit">
+        <button
+          type="button"
+          onClick={() => setMode('question')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === 'question' ? 'bg-deepBlue text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          Ask an IP Question
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('product')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            mode === 'product' ? 'bg-deepBlue text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          Analyze My Product
+        </button>
+      </div>
+
+      {mode === 'product' ? (
+        <div>
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-deepBlue mb-2">Product Profile</h2>
+            <p className="text-gray-600">Record the characteristics that distinguish your product. This step only creates a structured profile.</p>
+          </div>
+
+          <form onSubmit={handleProductSubmit} className="bg-white border border-lightGray rounded-lg p-6 space-y-5">
+            {([
+              ['product_type', 'Product Type', 'e.g. Ayurvedic oil'],
+              ['ingredients', 'Ingredients', 'e.g. Ashwagandha, Sesame Oil, Brahmi, Amla'],
+              ['proportions', 'Proportions / Ratios', 'e.g. 20:10:30:40'],
+              ['intended_use', 'Intended Use', 'e.g. Body massage'],
+              ['target_application', 'Target Application', 'e.g. Muscles'],
+              ['preparation_method', 'Preparation Method', 'Describe the heating or extraction process'],
+              ['claimed_effect', 'Claimed Effect', 'e.g. Muscle relaxation']
+            ] as const).map(([field, label, placeholder]) => (
+              <label key={field} className="block">
+                <span className="block text-sm font-medium text-gray-700 mb-2">{label}</span>
+                {field === 'preparation_method' || field === 'claimed_effect' ? (
+                  <textarea
+                    required
+                    value={productProfile[field]}
+                    onChange={e => updateProductField(field, e.target.value)}
+                    placeholder={placeholder}
+                    rows={field === 'preparation_method' ? 3 : 2}
+                    className="w-full p-3 border border-lightGray rounded-lg focus:outline-none focus:ring-2 focus:ring-deepBlue/20 resize-none"
+                  />
+                ) : (
+                  <input
+                    required
+                    value={productProfile[field]}
+                    onChange={e => updateProductField(field, e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full p-3 border border-lightGray rounded-lg focus:outline-none focus:ring-2 focus:ring-deepBlue/20"
+                  />
+                )}
+                {field === 'ingredients' && <span className="block text-xs text-gray-500 mt-1">Separate ingredients with commas.</span>}
+              </label>
+            ))}
+
+            <button
+              type="submit"
+              disabled={productLoading}
+              className="bg-deepBlue text-white px-5 py-3 rounded-lg hover:bg-blue-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {productLoading ? 'Creating Profile...' : 'Create Product Profile'}
+            </button>
+          </form>
+
+          {productResponse && (
+            <div className="mt-6 bg-white border border-lightGray rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-deepBlue">Structured Profile</h3>
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">
+                  {productResponse.status}
+                </span>
+              </div>
+              <dl className="grid md:grid-cols-2 gap-4">
+                {Object.entries(productResponse.product_profile).map(([key, value]) => (
+                  <div key={key} className="bg-gray-50 rounded-lg p-3">
+                    <dt className="text-xs font-medium uppercase text-gray-500">{key.replace(/_/g, ' ')}</dt>
+                    <dd className="text-sm text-gray-700 mt-1">{Array.isArray(value) ? value.join(', ') : value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
+      ) : (
+      <div>
 
       {/* Jurisdiction & IP Regime Filters */}
       <div className="mb-6 flex flex-wrap gap-4">
@@ -550,6 +704,8 @@ const AskIPSakti = () => {
             </div>
           )}
         </div>
+      )}
+      </div>
       )}
     </div>
   )

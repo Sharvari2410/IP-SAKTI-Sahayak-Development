@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 import os
 import shutil
@@ -51,6 +51,21 @@ class QueryResponse(BaseModel):
     rag_process: Optional[dict] = None
 
 
+class InventionProfile(BaseModel):
+    product_type: str = Field(..., min_length=1)
+    ingredients: List[str] = Field(..., min_length=1)
+    proportions: str = Field(..., min_length=1)
+    intended_use: str = Field(..., min_length=1)
+    target_application: str = Field(..., min_length=1)
+    preparation_method: str = Field(..., min_length=1)
+    claimed_effect: str = Field(..., min_length=1)
+
+
+class ProductAnalysisResponse(BaseModel):
+    product_profile: InventionProfile
+    status: str
+
+
 class DocumentInfo(BaseModel):
     document_name: str
     page_count: int
@@ -94,6 +109,15 @@ async def get_documents():
             for doc in documents
         ]
     }
+
+
+@app.post("/analyze-product", response_model=ProductAnalysisResponse)
+async def analyze_product(profile: InventionProfile):
+    """Validate and return a structured product profile for future analysis."""
+    return ProductAnalysisResponse(
+        product_profile=profile,
+        status="profile_created"
+    )
 
 
 @app.post("/upload")
