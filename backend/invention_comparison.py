@@ -115,6 +115,8 @@ def retrieve_comparison_candidates(
             candidate = _result_to_candidate(results, index)
             if candidate is None:
                 continue
+            if not extract_feature_evidence(candidate):
+                continue
             if candidate["id"] in seen_ids:
                 continue
             seen_ids.add(candidate["id"])
@@ -174,9 +176,68 @@ def _sentence_with_terms(text: str, terms: Sequence[str]) -> str:
     return unique_sentences[0] if unique_sentences else ""
 
 
+def _has_formulation_context(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:composition|formulation|ingredients?|comprising|consisting of|prepared from|prepared by)\b",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _is_regulatory_fragment(text: str) -> bool:
+    regulatory_terms = (
+        r"\bflavouring agent\b",
+        r"\bflavoring agent\b",
+        r"\bantioxidant\b",
+        r"\bmaximum permitted\b",
+        r"\bpermitted limit\b",
+        r"\bmicrobiological\b",
+        r"\bfood additive\b",
+        r"\bpreservative\b",
+    )
+    return bool(re.search("|".join(regulatory_terms), text, re.IGNORECASE)) and not _has_formulation_context(text)
+
+
+def _extract_formulation_prose(text: str) -> Dict[str, str]:
+    extracted: Dict[str, str] = {}
+    composition_match = re.search(
+        r"(?:an?\s+)?(?:ayurvedic\s+)?(?P<product>[a-z][a-z -]+?)\s+composition\s+(?:comprising|consisting of)\s+(?P<ingredients>.+?)(?=,?\s+prepared by\b|,?\s+used for\b|,?\s+applied to\b|\.|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if composition_match:
+        extracted["product_type"] = _clean_evidence(composition_match.group("product"))
+        extracted["ingredients"] = _clean_evidence(composition_match.group("ingredients"))
+        proportion_values = re.findall(
+            r"\b\d+(?:\.\d+)?\s*(?:%|g|kg|ml|l)\b|(?:\b\d+\s*:\s*)+\d+",
+            composition_match.group("ingredients"),
+            re.IGNORECASE,
+        )
+        if proportion_values:
+            extracted["proportions"] = ", ".join(proportion_values)
+
+    preparation_match = re.search(r"\bprepared by\s+(.+?)(?=\.|\s+and\s+used\b|$)", text, re.IGNORECASE)
+    if preparation_match:
+        extracted["preparation_method"] = _clean_evidence(preparation_match.group(1))
+
+    use_match = re.search(r"\bused for\s+(.+?)(?=\.|\s+and\s+applied\b|$)", text, re.IGNORECASE)
+    if use_match:
+        extracted["intended_use"] = _clean_evidence(use_match.group(1))
+
+    application_match = re.search(r"\b(?:applied to|application to)\s+(.+?)(?=\.|$)", text, re.IGNORECASE)
+    if application_match:
+        extracted["target_application"] = _clean_evidence(application_match.group(1))
+
+    return extracted
+
+
 def extract_feature_evidence(candidate: Dict[str, Any]) -> Dict[str, str]:
     """Extract only explicitly supported feature evidence from raw chunk text."""
     text = str(candidate.get("text", ""))
+    if not text.strip() or _is_regulatory_fragment(text):
+        return {}
+
+    formulation_prose = _extract_formulation_prose(text)
     extracted = {
         "product_type": _labeled_value(text, r"product type|product|formulation type"),
         "ingredients": _labeled_value(
@@ -192,27 +253,30 @@ def extract_feature_evidence(candidate: Dict[str, Any]) -> Dict[str, str]:
         "preparation_method": _labeled_value(text, r"preparation method|prepared by|preparation|process|method"),
         "claimed_effect": _labeled_value(text, r"claimed effect|effect|efficacy|provides|helps|promotes|reduces|relieves"),
     }
+    for feature, value in formulation_prose.items():
+        if not extracted.get(feature):
+            extracted[feature] = value
 
-    if not extracted["product_type"]:
+    if not extracted["product_type"] and _has_formulation_context(text):
         extracted["product_type"] = _sentence_with_terms(
             text,
             [r"\boil\b", r"\bformulation\b", r"\bpaste\b", r"\bpowder\b", r"\btablet\b", r"\bdecoction\b", r"\bcream\b"],
         )
-    if not extracted["proportions"]:
+    if not extracted["proportions"] and _has_formulation_context(text):
         ratio_match = re.search(r"(?:\b\d+\s*:\s*)+\d+|\b\d+(?:\.\d+)?\s*%|\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l)\b", text, re.IGNORECASE)
         if ratio_match:
             extracted["proportions"] = _clean_evidence(ratio_match.group(0))
-    if not extracted["target_application"]:
+    if not extracted["target_application"] and _has_formulation_context(text):
         extracted["target_application"] = _sentence_with_terms(
             text,
             [r"\bscalp\b", r"\bhair\b", r"\bskin\b", r"\bmuscle\w*\b", r"\bjoints?\b", r"\bwound\w*\b", r"\bbody\b", r"\bface\b"],
         )
-    if not extracted["preparation_method"]:
+    if not extracted["preparation_method"] and _has_formulation_context(text):
         extracted["preparation_method"] = _sentence_with_terms(
             text,
             [r"\bdecoction\b", r"\bextract\w*\b", r"\bheating\b", r"\bboil\w*\b", r"\bferment\w*\b", r"\bgrind\w*\b"],
         )
-    if not extracted["claimed_effect"]:
+    if not extracted["claimed_effect"] and _has_formulation_context(text):
         extracted["claimed_effect"] = _sentence_with_terms(
             text,
             [r"\banti-inflammatory\b", r"\banalgesic\b", r"\breliev\w*\b", r"\breduc\w*\b", r"\bpromot\w*\b", r"\bhelp\w*\b"],

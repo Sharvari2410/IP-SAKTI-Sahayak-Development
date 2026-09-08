@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Send, ChevronDown, ChevronUp } from 'lucide-react'
+import { Send, ChevronDown, ChevronUp, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
 
 interface RetrievedChunk {
   id: string
@@ -48,6 +48,65 @@ interface ProductAnalysisResponse {
   status: string
 }
 
+type ComparisonAssessment = 'overlap' | 'difference' | 'not_disclosed' | 'uncertain'
+type OverallAssessment = 'distinguishable' | 'partial_overlap' | 'strong_overlap' | 'insufficient_evidence'
+
+interface EvidenceReference {
+  document_name: string
+  page_num: string
+  chunk_id: string
+  text: string
+  extracted_evidence: string
+}
+
+interface FeatureComparison {
+  feature_name: string
+  applicant_value: string | string[]
+  evidence_value?: string | string[]
+  assessment: ComparisonAssessment
+  evidence_references: EvidenceReference[]
+}
+
+interface ComparisonEvidenceItem {
+  id: string
+  text: string
+  metadata: Record<string, unknown>
+  distance: number
+  relevance_score: number
+}
+
+interface ComparisonResponse {
+  product_profile: Record<string, unknown>
+  evidence_items: ComparisonEvidenceItem[]
+  feature_comparisons: FeatureComparison[]
+  overall_assessment: OverallAssessment
+  explanation: string
+}
+
+const comparisonFeatureLabels: Record<string, string> = {
+  product_type: 'Product Type',
+  ingredients: 'Ingredients',
+  proportions: 'Proportions',
+  intended_use: 'Intended Use',
+  target_application: 'Target Application',
+  preparation_method: 'Preparation Method',
+  claimed_effect: 'Claimed Effect'
+}
+
+const assessmentLabels: Record<ComparisonAssessment, string> = {
+  overlap: 'Overlap',
+  difference: 'Difference',
+  not_disclosed: 'Not disclosed',
+  uncertain: 'Uncertain'
+}
+
+const overallAssessmentLabels: Record<OverallAssessment, string> = {
+  distinguishable: 'Distinguishable',
+  partial_overlap: 'Partial Overlap',
+  strong_overlap: 'Strong Overlap',
+  insufficient_evidence: 'Insufficient Evidence'
+}
+
 const AskIPSakti = () => {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,6 +114,9 @@ const AskIPSakti = () => {
   const [mode, setMode] = useState<'question' | 'product'>('question')
   const [productLoading, setProductLoading] = useState(false)
   const [productResponse, setProductResponse] = useState<ProductAnalysisResponse | null>(null)
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [comparisonResponse, setComparisonResponse] = useState<ComparisonResponse | null>(null)
+  const [comparisonError, setComparisonError] = useState<string | null>(null)
   const [productProfile, setProductProfile] = useState<ProductProfileForm>({
     product_type: '',
     ingredients: '',
@@ -267,6 +329,62 @@ const AskIPSakti = () => {
 
   const updateProductField = (field: keyof ProductProfileForm, value: string) => {
     setProductProfile(prev => ({ ...prev, [field]: value }))
+    setComparisonResponse(null)
+    setComparisonError(null)
+  }
+
+  const getProductProfilePayload = () => ({
+    product_type: productProfile.product_type,
+    ingredients: productProfile.ingredients.split(',').map(ingredient => ingredient.trim()).filter(Boolean),
+    proportions: productProfile.proportions,
+    intended_use: productProfile.intended_use,
+    target_application: productProfile.target_application,
+    preparation_method: productProfile.preparation_method,
+    claimed_effect: productProfile.claimed_effect
+  })
+
+  const handleCompareProduct = async () => {
+    setComparisonLoading(true)
+    setComparisonResponse(null)
+    setComparisonError(null)
+
+    try {
+      const res = await fetch('http://localhost:8000/compare-invention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_profile: getProductProfilePayload() })
+      })
+
+      if (!res.ok) {
+        throw new Error('The comparison could not be completed.')
+      }
+
+      setComparisonResponse(await res.json() as ComparisonResponse)
+    } catch (error) {
+      console.error('Error comparing product:', error)
+      setComparisonError('We could not compare this profile right now. Your entered profile is preserved; please try again.')
+    } finally {
+      setComparisonLoading(false)
+    }
+  }
+
+  const formatComparisonValue = (value: string | string[] | undefined) => {
+    if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'Not disclosed'
+    return value?.trim() || 'Not disclosed'
+  }
+
+  const getFeatureComparison = (featureName: string) => {
+    const matches = getFeatureComparisons(featureName)
+    return matches.find(item => item.assessment === 'overlap' || item.assessment === 'difference') || matches[0]
+  }
+
+  const getFeatureComparisons = (featureName: string) => (
+    comparisonResponse?.feature_comparisons.filter(item => item.feature_name === featureName) || []
+  )
+
+  const getSafeMetadataValue = (metadata: Record<string, unknown>, key: string) => {
+    const value = metadata[key]
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
   }
 
   const generateFollowUpQuestions = (currentQuestion: string, retrievedChunks: RetrievedChunk[]) => {
@@ -382,7 +500,16 @@ const AskIPSakti = () => {
               disabled={productLoading}
               className="bg-deepBlue text-white px-5 py-3 rounded-lg hover:bg-blue-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {productLoading ? 'Creating Profile...' : 'Create Product Profile'}
+              {productLoading ? 'Analyzing product...' : 'Analyze Product'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCompareProduct}
+              disabled={comparisonLoading}
+              className="ml-3 inline-flex items-center gap-2 border border-deepBlue text-deepBlue px-5 py-3 rounded-lg hover:bg-deepBlue/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {comparisonLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {comparisonLoading ? 'Comparing evidence...' : 'Compare Against Evidence'}
             </button>
           </form>
 
@@ -402,6 +529,163 @@ const AskIPSakti = () => {
                   </div>
                 ))}
               </dl>
+            </div>
+          )}
+
+          {comparisonError && (
+            <div className="mt-6 flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4 text-red-800" role="alert">
+              <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium">Comparison unavailable</p>
+                <p className="text-sm mt-1">{comparisonError}</p>
+              </div>
+            </div>
+          )}
+
+          {comparisonResponse && (
+            <div className="mt-8 space-y-6">
+              <div className="bg-white border border-lightGray rounded-lg p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+                  <div>
+                    <p className="text-xs font-semibold tracking-wide text-saffron uppercase">Preliminary Evidence Comparison</p>
+                    <h2 className="text-2xl font-bold text-deepBlue mt-1">Evidence across seven dimensions</h2>
+                  </div>
+                  <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-deepBlue/5 text-deepBlue font-semibold">
+                    <CheckCircle2 className="w-5 h-5" />
+                    {overallAssessmentLabels[comparisonResponse.overall_assessment]}
+                  </div>
+                </div>
+                <p className="text-gray-700 leading-relaxed">{comparisonResponse.explanation}</p>
+                <div className="mt-4 flex items-start gap-3 bg-saffron/10 border border-saffron/30 rounded-lg p-4 text-sm text-gray-700">
+                  <AlertCircle className="w-5 h-5 text-saffron mt-0.5 flex-shrink-0" />
+                  <p>Ingredient overlap alone does not establish invention overlap. The comparison considers the invention across multiple dimensions.</p>
+                </div>
+                <p className="text-xs text-gray-500 mt-4">This comparison highlights similarities and differences in retrieved evidence. It is not a legal patentability determination.</p>
+              </div>
+
+              <div className="bg-white border border-lightGray rounded-lg p-6">
+                <h3 className="font-semibold text-deepBlue mb-2">7-Dimension Comparison</h3>
+                <p className="text-xs text-gray-500 mb-4">The table shows a representative assessment for each dimension. All retrieved feature evidence appears below.</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-lightGray text-xs uppercase tracking-wide text-gray-500">
+                        <th className="py-3 pr-4 font-semibold">Feature</th>
+                        <th className="py-3 px-4 font-semibold">Your Invention</th>
+                        <th className="py-3 px-4 font-semibold">Retrieved Evidence</th>
+                        <th className="py-3 px-4 font-semibold">Assessment</th>
+                        <th className="py-3 pl-4 font-semibold">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(comparisonFeatureLabels).map(([featureName, label]) => {
+                        const feature = getFeatureComparison(featureName)
+                        const reference = feature?.evidence_references[0]
+                        const assessment = feature?.assessment || 'not_disclosed'
+                        return (
+                          <tr key={featureName} className="border-b border-lightGray last:border-0 align-top">
+                            <th className="py-4 pr-4 font-semibold text-deepBlue">{label}</th>
+                            <td className="py-4 px-4 text-gray-700 max-w-[220px] break-words">{formatComparisonValue(feature?.applicant_value || productProfile[featureName as keyof ProductProfileForm])}</td>
+                            <td className="py-4 px-4 text-gray-700 max-w-[260px] break-words">{formatComparisonValue(feature?.evidence_value)}</td>
+                            <td className="py-4 px-4">
+                              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${
+                                assessment === 'overlap' ? 'bg-green-50 text-green-800 border-green-200' :
+                                assessment === 'difference' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                assessment === 'uncertain' ? 'bg-yellow-50 text-yellow-800 border-yellow-200' :
+                                'bg-gray-50 text-gray-700 border-gray-200'
+                              }`}>
+                                {assessmentLabels[assessment]}
+                              </span>
+                            </td>
+                            <td className="py-4 pl-4 text-xs text-gray-600 max-w-[180px] break-words">
+                              {reference ? `${reference.document_name || 'Source information not available'} · ${reference.page_num ? `Page ${reference.page_num}` : 'Page not available'}` : 'Source information not available'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-white border border-lightGray rounded-lg p-6">
+                <h3 className="font-semibold text-deepBlue mb-4">Feature-Level Evidence</h3>
+                <div className="space-y-4">
+                  {Object.entries(comparisonFeatureLabels).map(([featureName, label]) => {
+                    const features = getFeatureComparisons(featureName)
+                    return (
+                      <div key={featureName} className="bg-gray-50 border border-lightGray rounded-lg p-4">
+                        <h4 className="font-semibold text-deepBlue mb-3">{label}</h4>
+                        {features.length === 0 ? (
+                          <p className="text-sm text-gray-600">No feature-level evidence was returned.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {features.map((feature, featureIndex) => (
+                              <div key={`${featureName}-${featureIndex}`} className="border-t border-lightGray first:border-t-0 first:pt-0 pt-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${
+                                    feature.assessment === 'overlap' ? 'bg-green-50 text-green-800 border-green-200' :
+                                    feature.assessment === 'difference' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                    feature.assessment === 'uncertain' ? 'bg-yellow-50 text-yellow-800 border-yellow-200' :
+                                    'bg-gray-50 text-gray-700 border-gray-200'
+                                  }`}>
+                                    {assessmentLabels[feature.assessment]}
+                                  </span>
+                                  <span className="text-xs text-gray-500">Retrieved comparison {featureIndex + 1}</span>
+                                </div>
+                                <p className="text-sm text-gray-700"><strong>Your invention:</strong> {formatComparisonValue(feature.applicant_value || productProfile[featureName as keyof ProductProfileForm])}</p>
+                                <p className="text-sm text-gray-700 mt-1"><strong>Retrieved evidence:</strong> {formatComparisonValue(feature.evidence_value)}</p>
+                                {feature.evidence_references.length === 0 ? (
+                                  <p className="text-sm text-gray-600 mt-2">Source information not available</p>
+                                ) : (
+                                  feature.evidence_references.map((reference, referenceIndex) => (
+                                    <div key={`${featureName}-${featureIndex}-reference-${referenceIndex}`} className="mt-2 text-sm text-gray-600">
+                                      <p><strong>Source:</strong> {reference.document_name || 'Source information not available'} · {reference.page_num ? `Page ${reference.page_num}` : 'Page not available'} · {reference.chunk_id ? `Chunk ${reference.chunk_id}` : 'Chunk ID not available'}</p>
+                                      {reference.extracted_evidence && <p className="mt-1"><strong>Evidence:</strong> {reference.extracted_evidence}</p>}
+                                      {reference.text && (
+                                        <details className="mt-1">
+                                          <summary className="cursor-pointer text-deepBlue">Original source text</summary>
+                                          <p className="mt-1 whitespace-pre-wrap break-words">{reference.text}</p>
+                                        </details>
+                                      )}
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-lightGray rounded-lg p-6">
+                <h3 className="font-semibold text-deepBlue mb-4">Retrieved Evidence</h3>
+                {comparisonResponse.evidence_items.length === 0 ? (
+                  <p className="text-sm text-gray-600">No comparable evidence was retrieved from the current knowledge base.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {comparisonResponse.evidence_items.map(item => {
+                      const documentName = getSafeMetadataValue(item.metadata, 'document_name') || 'Source information not available'
+                      const page = getSafeMetadataValue(item.metadata, 'page_num')
+                      const chunkId = getSafeMetadataValue(item.metadata, 'chunk_id')
+                      return (
+                        <div key={item.id} className="border border-lightGray rounded-lg p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <span className="font-medium text-deepBlue">{documentName}</span>
+                            <span className="text-xs text-gray-500">
+                              {page ? `Page ${page}` : 'Page not available'}{chunkId ? ` · Chunk ${chunkId}` : ''}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{item.text || 'Retrieved text not available.'}</p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

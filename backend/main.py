@@ -21,6 +21,7 @@ from invention_comparison import (
     compare_candidate,
     retrieve_comparison_candidates,
 )
+from retrieval_ranking import hybrid_rank_retrieved_chunks, lexical_retrieve
 
 app = FastAPI(title="IP-SAKTI Sahayak API")
 
@@ -200,18 +201,16 @@ async def query(request: QueryRequest):
         query_embedding = embedding_generator.generate_query_embedding(request.question)
         
         # Retrieve relevant chunks
-        results = vector_store.query(query_embedding, n_results=5)
-        
-        # Format retrieved chunks
-        retrieved_chunks = []
-        for i in range(len(results['ids'][0])):
-            retrieved_chunks.append({
-                'id': results['ids'][0][i],
-                'text': results['documents'][0][i],
-                'metadata': results['metadatas'][0][i],
-                'distance': results['distances'][0][i],
-                'relevance_score': 1 - results['distances'][0][i]  # Convert distance to relevance
-            })
+        results = vector_store.query(query_embedding, n_results=30)
+
+        # Merge semantic retrieval with a lightweight lexical scan of existing Chroma chunks.
+        lexical_candidates = lexical_retrieve(request.question, vector_store, limit=30)
+        retrieved_chunks = hybrid_rank_retrieved_chunks(
+            request.question,
+            results,
+            lexical_candidates,
+            limit=5,
+        )
         
         # Generate answer using LLM
         llm_response = llm_client.generate_answer(request.question, retrieved_chunks)
@@ -236,7 +235,7 @@ async def query(request: QueryRequest):
                     for chunk in retrieved_chunks
                 ],
                 "context_length": sum(len(chunk['text']) for chunk in retrieved_chunks),
-                "llm_model": "llama3-8b-8192"
+                "llm_model": "openai/gpt-oss-20b"
             }
         
         return QueryResponse(

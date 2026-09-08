@@ -11,7 +11,7 @@ class GroqClient:
     
     def __init__(self, api_key: str):
         self.client = Groq(api_key=api_key)
-        self.model = "llama3-8b-8192"  # Using Llama 3 on Groq
+        self.model = "openai/gpt-oss-20b"  # Supported production model on Groq
         logger.info("Groq client initialized")
     
     def generate_answer(self, query: str, context_chunks: List[Dict[str, any]]) -> Dict[str, any]:

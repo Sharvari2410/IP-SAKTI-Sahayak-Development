@@ -5,6 +5,7 @@ from backend.invention_comparison import (
     assess_overall,
     build_retrieval_queries,
     compare_candidate,
+    extract_feature_evidence,
     retrieve_comparison_candidates,
 )
 
@@ -17,6 +18,47 @@ class Profile:
     target_application = "Muscles"
     preparation_method = "Process X"
     claimed_effect = "Muscle relaxation"
+
+
+class SyntheticBodyOilProfile:
+    product_type = "Ayurvedic Body Oil"
+    ingredients = ["Ashwagandha", "sesame oil"]
+    proportions = "20:10"
+    intended_use = "Body massage"
+    target_application = "Muscles"
+    preparation_method = "Boiling"
+    claimed_effect = "Relaxation"
+
+
+SYNTHETIC_RECORD_A_TEXT = """SYNTHETIC TEST DATA / NOT REAL PRIOR ART
+Synthetic Prior-Art Record A
+Product Type: Ayurvedic Hair Oil
+Ingredients: Ashwagandha, sesame oil
+Proportions: 20:10
+Intended Use: Hair care
+Target Application: Scalp and hair follicles
+Preparation Method: Boiling the herbal ingredients in sesame oil
+Claimed Effect: Supports hair growth"""
+
+SYNTHETIC_RECORD_B_TEXT = """SYNTHETIC TEST DATA / NOT REAL PRIOR ART
+Synthetic Prior-Art Record B
+Product Type: Ayurvedic Body Oil
+Ingredients: Ashwagandha, sesame oil
+Proportions: 20:10
+Intended Use: Body massage
+Target Application: Muscles
+Preparation Method: Boiling
+Claimed Effect: Promotes relaxation"""
+
+SYNTHETIC_RECORD_C_TEXT = """SYNTHETIC TEST DATA / NOT REAL PRIOR ART
+Synthetic Prior-Art Record C
+Product Type: Herbal powder
+Ingredients: Turmeric, neem leaf
+Proportions: 5:1
+Intended Use: Skin cleansing
+Target Application: Facial skin
+Preparation Method: Grinding and drying
+Claimed Effect: Reduces surface irritation"""
 
 
 def raw_candidate(text, chunk_id="1"):
@@ -33,7 +75,98 @@ def raw_candidate(text, chunk_id="1"):
     }
 
 
+def synthetic_candidate(text, document_name, page_num, chunk_id):
+    candidate = raw_candidate(text, chunk_id)
+    candidate["metadata"] = {
+        "document_name": document_name,
+        "page_num": page_num,
+        "chunk_id": chunk_id,
+    }
+    candidate["id"] = f"{document_name}-p{page_num}-c{chunk_id}"
+    return candidate
+
+
 class RawTextComparisonTest(unittest.TestCase):
+    def test_synthetic_mentor_scenario_preserves_multidimensional_difference(self):
+        candidate = synthetic_candidate(SYNTHETIC_RECORD_A_TEXT, "synthetic-record-a.pdf", "1", "a-1")
+
+        comparisons = compare_candidate(SyntheticBodyOilProfile(), candidate)
+        by_feature = {comparison.feature_name: comparison for comparison in comparisons}
+
+        self.assertEqual(by_feature["product_type"].assessment, "difference")
+        self.assertEqual(by_feature["ingredients"].assessment, "overlap")
+        self.assertEqual(by_feature["proportions"].assessment, "overlap")
+        self.assertEqual(by_feature["intended_use"].assessment, "difference")
+        self.assertEqual(by_feature["target_application"].assessment, "difference")
+        self.assertEqual(by_feature["preparation_method"].assessment, "overlap")
+        self.assertEqual(by_feature["claimed_effect"].assessment, "difference")
+        self.assertIn(assess_overall(comparisons), {"partial_overlap", "distinguishable"})
+        self.assertNotEqual(assess_overall(comparisons), "strong_overlap")
+
+    def test_synthetic_matching_record_can_produce_strong_overlap(self):
+        candidate = synthetic_candidate(SYNTHETIC_RECORD_B_TEXT, "synthetic-record-b.pdf", "1", "b-1")
+
+        comparisons = compare_candidate(SyntheticBodyOilProfile(), candidate)
+
+        self.assertTrue(all(item.assessment == "overlap" for item in comparisons))
+        self.assertEqual(assess_overall(comparisons), "strong_overlap")
+
+    def test_synthetic_different_formulation_is_not_strong_overlap(self):
+        candidate = synthetic_candidate(SYNTHETIC_RECORD_C_TEXT, "synthetic-record-c.pdf", "3", "c-1")
+
+        comparisons = compare_candidate(SyntheticBodyOilProfile(), candidate)
+
+        self.assertNotEqual(assess_overall(comparisons), "strong_overlap")
+        self.assertEqual(
+            sum(item.assessment == "difference" for item in comparisons),
+            7,
+        )
+
+    def test_synthetic_fixture_metadata_contains_only_chroma_identifiers(self):
+        candidate = synthetic_candidate(SYNTHETIC_RECORD_A_TEXT, "synthetic-record-a.pdf", "1", "a-1")
+
+        self.assertEqual(set(candidate["metadata"]), {"document_name", "page_num", "chunk_id"})
+        evidence = extract_feature_evidence(candidate)
+        self.assertIn("product_type", evidence)
+        self.assertIn("ingredients", evidence)
+
+    def test_synthetic_evidence_traceability_preserves_all_source_fields(self):
+        candidate = synthetic_candidate(SYNTHETIC_RECORD_A_TEXT, "synthetic-record-a.pdf", "1", "a-1")
+
+        comparisons = compare_candidate(SyntheticBodyOilProfile(), candidate)
+
+        for comparison in comparisons:
+            self.assertEqual(len(comparison.evidence_references), 1)
+            reference = comparison.evidence_references[0]
+            self.assertEqual(reference.document_name, "synthetic-record-a.pdf")
+            self.assertEqual(reference.page_num, "1")
+            self.assertEqual(reference.chunk_id, "a-1")
+            self.assertEqual(reference.text, SYNTHETIC_RECORD_A_TEXT)
+            if comparison.feature_name in extract_feature_evidence(candidate):
+                self.assertTrue(reference.extracted_evidence)
+
+    def test_regulatory_additive_row_is_not_formulation_evidence(self):
+        evidence = extract_feature_evidence(raw_candidate("Rosemary oil 1% Antioxidant"))
+
+        self.assertNotIn("product_type", evidence)
+        self.assertNotIn("proportions", evidence)
+        comparisons = compare_candidate(Profile(), raw_candidate("Rosemary oil 1% Antioxidant"))
+        self.assertTrue(all(item.assessment == "not_disclosed" for item in comparisons))
+
+    def test_actual_formulation_prose_extracts_meaningful_features(self):
+        text = (
+            "An Ayurvedic hair oil composition comprising sesame oil 70%, coconut oil 20% "
+            "and Ashwagandha extract 10%, prepared by heating the ingredients and used for "
+            "scalp application."
+        )
+        evidence = extract_feature_evidence(raw_candidate(text))
+
+        self.assertEqual(evidence["product_type"], "hair oil")
+        self.assertIn("sesame oil 70%", evidence["ingredients"].lower())
+        self.assertIn("70%", evidence["proportions"])
+        self.assertEqual(evidence["preparation_method"], "heating the ingredients")
+        self.assertEqual(evidence["intended_use"], "scalp application")
+
     def test_same_ingredients_different_use_and_effect(self):
         candidate = raw_candidate(
             "Product type: Ayurvedic oil\n"
@@ -163,6 +296,22 @@ class RetrievalTest(unittest.TestCase):
                     "documents": [[]],
                     "metadatas": [[]],
                     "distances": [[]],
+                }
+
+        self.assertEqual(retrieve_comparison_candidates(Profile(), Embeddings(), Store()), [])
+
+    def test_regulatory_rows_are_filtered_from_comparison_candidates(self):
+        class Embeddings:
+            def generate_query_embedding(self, query):
+                return [query]
+
+        class Store:
+            def query(self, query_embedding, n_results):
+                return {
+                    "ids": [["regulatory-row"]],
+                    "documents": [["Rosemary oil 1% Antioxidant"]],
+                    "metadatas": [[{"document_name": "gazette.pdf", "page_num": "2", "chunk_id": "1"}]],
+                    "distances": [[0.1]],
                 }
 
         self.assertEqual(retrieve_comparison_candidates(Profile(), Embeddings(), Store()), [])
