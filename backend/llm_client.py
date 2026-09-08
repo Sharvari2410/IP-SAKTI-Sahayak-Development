@@ -102,7 +102,8 @@ ANSWER:"""
             "insufficient information",
             "not mentioned in the context",
             "context does not contain",
-            "cannot be determined from the provided context"
+            "cannot be determined from the provided context",
+            "this information is not available in the provided context"
         ]
         answer_lower = answer.lower()
         return not any(phrase in answer_lower for phrase in insufficient_phrases)

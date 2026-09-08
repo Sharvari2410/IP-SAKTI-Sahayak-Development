@@ -184,6 +184,18 @@ def _has_formulation_context(text: str) -> bool:
     ))
 
 
+def _is_guideline_example(text: str) -> bool:
+    """Detect if text is a generic guideline example, not actual formulation evidence."""
+    guideline_patterns = (
+        r"\bclaims of alleged invention relate to\b",
+        r"\bexample involving\b",
+        r"\billustrative example\b",
+        r"\bexemplary embodiment\b",
+        r"\bfor instance\b",
+    )
+    return bool(re.search("|".join(guideline_patterns), text, re.IGNORECASE))
+
+
 def _is_regulatory_fragment(text: str) -> bool:
     regulatory_terms = (
         r"\bflavouring agent\b",
@@ -234,7 +246,7 @@ def _extract_formulation_prose(text: str) -> Dict[str, str]:
 def extract_feature_evidence(candidate: Dict[str, Any]) -> Dict[str, str]:
     """Extract only explicitly supported feature evidence from raw chunk text."""
     text = str(candidate.get("text", ""))
-    if not text.strip() or _is_regulatory_fragment(text):
+    if not text.strip() or _is_regulatory_fragment(text) or _is_guideline_example(text):
         return {}
 
     formulation_prose = _extract_formulation_prose(text)

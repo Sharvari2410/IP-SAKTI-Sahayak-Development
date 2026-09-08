@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from backend.invention_comparison import (
+from invention_comparison import (
     assess_overall,
     build_retrieval_queries,
     compare_candidate,
@@ -251,6 +251,38 @@ class RawTextComparisonTest(unittest.TestCase):
         self.assertEqual(ingredient_reference.chunk_id, "chunk-7")
         self.assertEqual(ingredient_reference.text, original_text)
         self.assertEqual(ingredient_reference.extracted_evidence, "A, B, C, D")
+
+    def test_guideline_example_is_rejected_as_formulation_evidence(self):
+        guideline_text = (
+            "The claims of alleged invention relate to a composition comprising Karanj "
+            "and Heena in a specified ratio, prepared by boiling, used for ulcer/wound treatment. "
+            "This is an illustrative example of a patent application involving traditional knowledge."
+        )
+        evidence = extract_feature_evidence(raw_candidate(guideline_text))
+        self.assertEqual(evidence, {})
+
+    def test_legitimate_labeled_formulation_evidence_is_accepted(self):
+        formulation_text = (
+            "Product type: Ayurvedic oil\n"
+            "Ingredients: Ashwagandha, sesame oil\n"
+            "Proportions: 20:10\n"
+            "Intended use: body massage\n"
+            "Target application: muscles\n"
+            "Preparation method: boiling\n"
+            "Claimed effect: relaxation"
+        )
+        evidence = extract_feature_evidence(raw_candidate(formulation_text))
+        self.assertNotEqual(evidence, {})
+        self.assertIn("product_type", evidence)
+        self.assertIn("ingredients", evidence)
+
+    def test_legitimate_formulation_with_such_as_is_not_rejected(self):
+        formulation_text = (
+            "An Ayurvedic oil composition comprising sesame oil and Ashwagandha extract, "
+            "prepared by heating ingredients such as herbal extracts, used for body massage."
+        )
+        evidence = extract_feature_evidence(raw_candidate(formulation_text))
+        self.assertNotEqual(evidence, {})
 
 
 class RetrievalTest(unittest.TestCase):
