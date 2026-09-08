@@ -1,4 +1,3 @@
-import React from 'react'
 import { ArrowRight, Database, FileText, Brain, MessageSquare } from 'lucide-react'
 
 const About = () => {

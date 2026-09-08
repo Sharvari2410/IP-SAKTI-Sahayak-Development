@@ -16,8 +16,6 @@ const KnowledgeBase = () => {
   const [uploading, setUploading] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
-  const [selectedDocForTagging, setSelectedDocForTagging] = useState<string | null>(null)
-  const [newTag, setNewTag] = useState('')
   
   const availableTags = ['Patents', 'GI', 'Trademarks', 'Copyright', 'ABS', 'TKDL', 'Biodiversity', 'Regulatory', 'Case Law']
   const jurisdictionOptions = ['india', 'international']

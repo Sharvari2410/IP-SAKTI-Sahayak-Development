@@ -387,7 +387,7 @@ const AskIPSakti = () => {
     return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
   }
 
-  const generateFollowUpQuestions = (currentQuestion: string, retrievedChunks: RetrievedChunk[]) => {
+  const generateFollowUpQuestions = (currentQuestion: string) => {
     const followUpQuestions: string[] = []
     
     // Generate questions based on retrieved context
@@ -974,7 +974,7 @@ const AskIPSakti = () => {
             <div className="bg-white border border-lightGray rounded-lg p-6">
               <h3 className="font-semibold text-deepBlue mb-4">Follow-up Questions</h3>
               <div className="space-y-2">
-                {generateFollowUpQuestions(question, response.retrieved_chunks).map((followUp, index) => (
+                {generateFollowUpQuestions(question).map((followUp, index) => (
                   <button
                     key={index}
                     onClick={() => handleSuggestedQuestion(followUp)}

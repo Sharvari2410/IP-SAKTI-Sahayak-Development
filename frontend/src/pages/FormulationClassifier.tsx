@@ -175,11 +175,7 @@ const FormulationClassifier = () => {
 
   const classifyFormulation = () => {
     // Enhanced classification logic based on answers
-    const { source, intended_use, biological_source, abs_compliance, novelty, clinical_evidence } = answers
-
-    // Check ABS compliance warning
-    const needsABS = biological_source === 'Wild-harvested from India' || biological_source === 'Cultivated in India'
-    const absWarning = needsABS && abs_compliance !== 'Yes, NBA/SBB approval obtained'
+    const { source, intended_use, novelty, clinical_evidence } = answers
 
     if (source === 'Yes, exactly as described' && intended_use === 'Therapeutic treatment') {
       return 'classical'
